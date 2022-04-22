@@ -1,4 +1,4 @@
-package springbootsecurityjwt.dto;
+package springbootsecurityjwt.springjwt.dto;
 
 public class LoginRequest {
     private String username;

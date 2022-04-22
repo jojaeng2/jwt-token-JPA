@@ -1,4 +1,4 @@
-package springbootsecurityjwt.dto;
+package springbootsecurityjwt.springjwt.dto;
 
 import java.util.Set;
 

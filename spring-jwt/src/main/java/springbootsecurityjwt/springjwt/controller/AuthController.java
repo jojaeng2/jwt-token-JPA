@@ -8,15 +8,15 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
-import springbootsecurityjwt.dto.JwtResponse;
-import springbootsecurityjwt.dto.LoginRequest;
-import springbootsecurityjwt.dto.MessageResponse;
-import springbootsecurityjwt.dto.SignupRequest;
+import springbootsecurityjwt.springjwt.dto.*;
+import springbootsecurityjwt.springjwt.exception.TokenRefreshException;
 import springbootsecurityjwt.springjwt.models.ERole;
+import springbootsecurityjwt.springjwt.models.RefreshToken;
 import springbootsecurityjwt.springjwt.models.Role;
 import springbootsecurityjwt.springjwt.models.User;
 import springbootsecurityjwt.springjwt.repository.RoleRepository;
 import springbootsecurityjwt.springjwt.repository.UserRepository;
+import springbootsecurityjwt.springjwt.service.RefreshTokenService;
 import springbootsecurityjwt.springjwt.service.UserDetailsImpl;
 import springbootsecurityjwt.springjwt.utils.JwtUtils;
 
@@ -30,36 +30,53 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+
     @Autowired
     AuthenticationManager authenticationManager;
+
     @Autowired
     UserRepository userRepository;
+
     @Autowired
     RoleRepository roleRepository;
+
     @Autowired
     PasswordEncoder encoder;
+
     @Autowired
     JwtUtils jwtUtils;
+
+    @Autowired
+    private RefreshTokenService refreshTokenService;
+
     @PostMapping("/signin")
     public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
+        Authentication authentication = authenticationManager
+                .authenticate(new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
+
         SecurityContextHolder.getContext().setAuthentication(authentication);
-        String jwt = jwtUtils.generateJwtToken(authentication);
-        System.out.println(jwt);
         UserDetailsImpl userDetails = (UserDetailsImpl) authentication.getPrincipal();
-        List<String> roles = userDetails.getAuthorities().stream()
-                .map(item -> item.getAuthority())
+        String jwt = jwtUtils.generateJwtToken(userDetails);
+        List<String> roles = userDetails.getAuthorities().stream().map(item -> item.getAuthority())
                 .collect(Collectors.toList());
-        System.out.println(userDetails.getId());
-        System.out.println("userDetails.getUsername() = " + userDetails.getUsername());
-        System.out.println("roles = " + userDetails.getEmail());
-        return ResponseEntity.ok(new JwtResponse(jwt,
-                userDetails.getId(),
-                userDetails.getUsername(),
-                userDetails.getEmail(),
-                roles));
+
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+        return ResponseEntity.ok(new JwtResponse(jwt, refreshToken.getToken(), userDetails.getId(), userDetails.getUsername(), userDetails.getEmail(), roles));
     }
+
+    @PostMapping("/refreshtoken")
+    public ResponseEntity<?> refreshtoken(@Valid @RequestBody TokenRefreshRequest request) {
+        String requestRefreshToken = request.getRefreshToken();
+        return refreshTokenService.findByToken(requestRefreshToken)
+                .map(refreshTokenService::verifyExpiration)
+                .map(RefreshToken::getUser)
+                .map(user -> {
+                    String token = jwtUtils.generateTokenFromUsername(user.getUsername());
+                    return ResponseEntity.ok(new TokenRefreshResponse(token, requestRefreshToken));
+                })
+                .orElseThrow(() -> new TokenRefreshException(requestRefreshToken, "Refresh token is not in database!"));
+    }
+
     @PostMapping("/signup")
     public ResponseEntity<?> registerUser(@Valid @RequestBody SignupRequest signUpRequest) {
         if (userRepository.existsByUsername(signUpRequest.getUsername())) {
